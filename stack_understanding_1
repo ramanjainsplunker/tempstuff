@@ -38,7 +38,14 @@ index=_introspection host=idx* sourcetype=splunk_resource_usage component=Hostwi
 | timechart span=5m limit=100 useother=false p90(data.normalized_load_avg_1min) as load_avg by host
 
 
-<004 -1 - server info>
+<004-1 - compute-2- filter it with host=indexers only> <share a screenshot of a line graph>
+
+index=_introspection host=idx* sourcetype=splunk_resource_usage component=Hostwide earliest=-w@w+1d latest=-w@w+6d
+| eval cpu_busy='data.cpu_system_pct'+'data.cpu_user_pct' 
+| timechart span=5m limit=100 useother=false p99(data.normalized_load_avg_1min) as load_avg by host
+
+
+<004 -2 - server info>
 
 | rest timeout=600 splunk_server=*idx* /servicesNS/-/-/server/info 
 | fields splunk_server, numberOfVirtualCores, numberOfCores 
