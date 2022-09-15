@@ -1,37 +1,72 @@
-index=_introspection (component=Hostwide OR component=Partitions*) host=idx*.* earliest=-24h 
-| eval total_cpu_usage = 'data.cpu_system_pct' + 'data.cpu_user_pct' 
-| timechart span=1h partial=f limit=200 p99(total_cpu_usage) as cpu_usage, p99(data.normalized_load_avg_1min) as load_avg by host
-
-
-| tstats prestats=true
-    dc(host) as cluster_size
-    mode(data.cpu_idle_pct) as mode_idle_cpu
-    avg(data.cpu_idle_pct) as avg_idle_cpu
-    p25(data.cpu_idle_pct) as p75_idle_cpu
-    p10(data.cpu_idle_pct) as p90_idle_cpu
-    p05(data.cpu_idle_pct) as p95_idle_cpu
-    p01(data.cpu_idle_pct) as p99_idle_cpu
-    p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
-    p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
-    min(data.cpu_idle_pct) as max_idle_cpu
-    where earliest=-5h@h latest=-4h@h index=_introspection component::hostwide host=idx*.*  by data.virtual_cpu_count host 
-| stats 
-    dc(host) as cluster_size
-    mode(data.cpu_idle_pct) as mode_idle_cpu
-    avg(data.cpu_idle_pct) as avg_idle_cpu
-    p25(data.cpu_idle_pct) as p75_idle_cpu
-    p10(data.cpu_idle_pct) as p90_idle_cpu
-    p05(data.cpu_idle_pct) as p95_idle_cpu
-    p01(data.cpu_idle_pct) as p99_idle_cpu
-    p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
-    p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
-    min(data.cpu_idle_pct) as max_idle_cpu
-    by data.virtual_cpu_count 
-| eval total_cpus_in_cluster='data.virtual_cpu_count'*cluster_size 
-| fields - data.virtual_cpu_count 
-| foreach *_idle_* avg 
-    [| eval <<MATCHSEG1>>_cpu =100-round(<<FIELD>>,2)] 
-| fields - *_idle_* 
-| table cluster_size total_cpus_in_cluster * 
-| eval vutil=round(((p99_cpu/100)*total_cpus_in_cluster),1)
-| fields cluster* vutil total_cpu* *
+index=_introspection (host=splunk-idx*.*)(host!=splunk-idx-master*) sourcetype="splunk_resource_usage" component=PerProcess data.normalized_pct_cpu=* NOT data.search_props.search_head=c0m* earliest=-3h@h latest=-2h@h 
+| rex field=host "^(?<role>\w+)-" 
+| rename data.search_props.* AS search_*, data.process_type AS process_type 
+| eval htc_consumer=case( 
+    match(process_type,"^search"),"search", 
+    role=="sh","shared services", 
+    role=="idx","data services") 
+| eval search_type=case(
+    ((search_type == "other") AND match(search_sid,"^scheduler")),"scheduled", 
+    ((search_type == "scheduled") AND match(search_sid,"^scheduler") AND (search_mode == "RT Indexed")),"scheduled realtime", 
+    (process_type == "search_launcher"),"search launcher", 
+    true(),search_type) 
+| rex field=search_sid "remote_.+com_(?:prd\.)?(?:ph\d_)?(?<unified_sid>.+)" 
+| eval unified_sid=if(isnull(unified_sid),search_sid,unified_sid) 
+| eval unified_sid=if(match(unified_sid,"^subsearch_(?!nested)"),replace(unified_sid,"subsearch_(summarize_)*|_\d{10}.\d+$",""),unified_sid) 
+| eval usage_source=case( 
+    isnotnull(search_search_head),search_search_head, 
+    match(role,"idx"),role, 
+    1=1, host) 
+| eval label=coalesce(sh_label,role) 
+| fillnull value="" search_user, unified_sid, usage_source 
+| bucket span=1h _time 
+| stats sum(data.normalized_pct_cpu) AS htc_consumption_score latest(dns_alt_name) AS dns_names values(label) AS labels values(search_mode) AS search_modes values(search_provenance) AS search_provenances values(search_label) AS search_label values(search_type) AS search_type values(search_app) AS search_app BY _time process_type htc_consumer search_user unified_sid usage_source 
+| eval search_label = if(search_type IN ("datamodel acceleration","report acceleration") AND isnull(search_label), search_acceleration_id, search_label) 
+| appendcols 
+    [| tstats prestats=true
+        dc(host) as cluster_size
+        mode(data.cpu_idle_pct) as mode_idle_cpu
+        avg(data.cpu_idle_pct) as avg_idle_cpu
+        p25(data.cpu_idle_pct) as p75_idle_cpu
+        p10(data.cpu_idle_pct) as p90_idle_cpu
+        p05(data.cpu_idle_pct) as p95_idle_cpu
+        p01(data.cpu_idle_pct) as p99_idle_cpu
+        p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
+        p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
+        min(data.cpu_idle_pct) as max_idle_cpu
+        where earliest=-3h@h latest=-2h@h index=_introspection component::hostwide (host=splunk-idx*.*)(host!=splunk-idx-master*) by data.virtual_cpu_count host 
+    | stats 
+        dc(host) as cluster_size
+        mode(data.cpu_idle_pct) as mode_idle_cpu
+        avg(data.cpu_idle_pct) as avg_idle_cpu
+        p25(data.cpu_idle_pct) as p75_idle_cpu
+        p10(data.cpu_idle_pct) as p90_idle_cpu
+        p05(data.cpu_idle_pct) as p95_idle_cpu
+        p01(data.cpu_idle_pct) as p99_idle_cpu
+        p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
+        p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
+        min(data.cpu_idle_pct) as max_idle_cpu
+        by data.virtual_cpu_count 
+    | eval total_cpus_in_cluster='data.virtual_cpu_count'*cluster_size 
+    | fields - data.virtual_cpu_count 
+    | foreach *_idle_* avg 
+        [| eval <<MATCHSEG1>>_cpu =100-round(<<FIELD>>,2)] 
+    | fields - *_idle_* 
+    | table cluster_size total_cpus_in_cluster * 
+    | eval htc=round(((p99_cpu/100)*total_cpus_in_cluster),1) 
+    | fields htc
+        ] 
+| streamstats last(htc) as htc 
+| eventstats latest(dns_names) AS search_head_names by usage_source 
+| eval search_head_names=if(isnull(search_head_names) AND usage_source!="idx",usage_source,search_head_names) 
+| eventstats sum(htc_consumption_score) AS consumer_consumption_score by _time htc_consumer 
+| eventstats sum(htc_consumption_score) AS total_consumption_score by _time 
+| eval htc_consumer_allocation=(consumer_consumption_score/total_consumption_score)*htc 
+| eval htc_usage=htc_consumer_allocation*(htc_consumption_score/consumer_consumption_score) 
+| table _time htc_consumer htc recon_htc_usage htc_usage usage_source process_type search_provenances search_type search_app search_label search_user unified_sid search_modes labels search_head_names 
+| eventstats sum(htc_usage) as recon_htc_usage 
+| fillnull value="" htc_consumer process_type search_provenances search_type search_app search_label search_user unified_sid search_modes labels search_head_names usage_source 
+| stats max(htc_usage) as htc_usage by _time htc_consumer search_type search_app search_label search_user search_head_names unified_sid process_type 
+| eval search_app = if(like(search_app, "") AND like(htc_consumer, "%data%"), "ingest", if(like(search_app, "") AND like(search_type, "%launcher%"), "shared_search_launcher", search_app))
+| eval search_head_names = if(like(search_head_names, "") AND like(htc_consumer, "%data%"), "ingest", if(like(search_head_names, "") AND like(search_type, "%launcher%"), "shared_search_launcher", search_head_names))
+| eval search_type = if(like(search_type, "") AND like(htc_consumer, "%data%"), "ingest", search_type)
