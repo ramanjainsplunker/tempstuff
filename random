@@ -1,0 +1,37 @@
+index=_introspection (component=Hostwide OR component=Partitions*) host=idx*.* earliest=-24h 
+| eval total_cpu_usage = 'data.cpu_system_pct' + 'data.cpu_user_pct' 
+| timechart span=1h partial=f limit=200 p99(total_cpu_usage) as cpu_usage, p99(data.normalized_load_avg_1min) as load_avg by host
+
+
+| tstats prestats=true
+    dc(host) as cluster_size
+    mode(data.cpu_idle_pct) as mode_idle_cpu
+    avg(data.cpu_idle_pct) as avg_idle_cpu
+    p25(data.cpu_idle_pct) as p75_idle_cpu
+    p10(data.cpu_idle_pct) as p90_idle_cpu
+    p05(data.cpu_idle_pct) as p95_idle_cpu
+    p01(data.cpu_idle_pct) as p99_idle_cpu
+    p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
+    p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
+    min(data.cpu_idle_pct) as max_idle_cpu
+    where earliest=-5h@h latest=-4h@h index=_introspection component::hostwide host=idx*.*  by data.virtual_cpu_count host 
+| stats 
+    dc(host) as cluster_size
+    mode(data.cpu_idle_pct) as mode_idle_cpu
+    avg(data.cpu_idle_pct) as avg_idle_cpu
+    p25(data.cpu_idle_pct) as p75_idle_cpu
+    p10(data.cpu_idle_pct) as p90_idle_cpu
+    p05(data.cpu_idle_pct) as p95_idle_cpu
+    p01(data.cpu_idle_pct) as p99_idle_cpu
+    p00.5(data.cpu_idle_pct) as p99_1_idle_cpu 
+    p00.1(data.cpu_idle_pct) as p99_9_idle_cpu
+    min(data.cpu_idle_pct) as max_idle_cpu
+    by data.virtual_cpu_count 
+| eval total_cpus_in_cluster='data.virtual_cpu_count'*cluster_size 
+| fields - data.virtual_cpu_count 
+| foreach *_idle_* avg 
+    [| eval <<MATCHSEG1>>_cpu =100-round(<<FIELD>>,2)] 
+| fields - *_idle_* 
+| table cluster_size total_cpus_in_cluster * 
+| eval vutil=round(((p99_cpu/100)*total_cpus_in_cluster),1)
+| fields cluster* vutil total_cpu* *
