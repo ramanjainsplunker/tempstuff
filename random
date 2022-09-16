@@ -1,0 +1,3 @@
+index=_introspection (component=Hostwide OR component=Partitions*) host=idx*.* earliest=-24h 
+| eval total_cpu_usage = 'data.cpu_system_pct' + 'data.cpu_user_pct' 
+| timechart span=1h partial=f limit=200 p99(total_cpu_usage) as cpu_usage, p99(data.normalized_load_avg_1min) as load_avg by host
