@@ -1,3 +1,22 @@
-index=_introspection (component=Hostwide OR component=Partitions*) host=idx*.* earliest=-24h 
-| eval total_cpu_usage = 'data.cpu_system_pct' + 'data.cpu_user_pct' 
-| timechart span=1h partial=f limit=200 p99(total_cpu_usage) as cpu_usage, p99(data.normalized_load_avg_1min) as load_avg by host
+index=_audit action=search total_run_time>0 earliest=-1d@d latest=-0d@d 
+| eval 
+    search_type = case(match(search_type, "^(scheduled|datamodel_acceleration|report_acceleration)$"), search_type,
+    match(search_id,"^\'\d{10}\.\d+"),"ad_hoc",
+    match(search_id,"^\'md\_"),"metadata",
+    match(search_id,"^\'prd\.ph\_"),"parallel_reduce",
+    match(search_id,"^\'rt\_\d{10}\.\d+"),"real_time",
+    match(search_id,"^\'scheduler\_\_?"),"scheduled",
+    match(search_id,"^\'subsearch\_"),"subsearch",
+    match(search_id,"^\'summarize\_"),"summary",
+    match(search_id,"^\'SummaryDirector\_"),"report_acceleration",
+    match(search_id,"^\'ta\_"),"type_ahead",
+    match(search_id,"^\'alertsmanager"),"type_ahead",
+    match(search_id,"^\'RemoteStorage"),"smartstore",
+    match(search_id,"^\'Noah"),"noah",
+    match(search_id,"^\'IndexesPrefix"),"indexes_prefix",
+    1=1,provenance) 
+| rex field=search_id "\'(?P<search_id>.*?)\'" 
+| eval search=if(isnull(savedsearch_name) OR savedsearch_name=="", search, savedsearch_name) 
+| eval search_type_mini=case(match(search_id,"^SummaryDirector_"),"summarization",match(savedsearch_name,"^_ACCELERATE_"),"acceleration",match(search_id,"^((rt_)?scheduler_|alertsmanager_)"),"scheduled",match(search_id,"\\d{10}\\.\\d+(_[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})?$"),"ad hoc",true(),"other") 
+| stats count p90(total_run_time) BY search_type_mini 
+| addcoltotals
