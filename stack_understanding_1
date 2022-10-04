@@ -50,7 +50,7 @@ index=_introspection host=idx* sourcetype=splunk_resource_usage component=Hostwi
 | rest timeout=600 splunk_server=*idx* /servicesNS/-/-/server/info 
 | fields splunk_server, numberOfVirtualCores, numberOfCores 
 | eval cpu_core_count = if(isnotnull(numberOfVirtualCores), numberOfVirtualCores, numberOfCores) 
-| eval potentialHTOffAlarm = if(isnotnull(numberOfVirtualCores), "yes", "no")
+| eval potentialHTOffAlarm = case (numberOfVirtualCores > numberOfCores, "HTON", numberOfVirtualCores=numberOfCores, "NotSure", numberOfVirtualCores="", "HTOFF")
 
 
 <005 - search-1> <share a screenshot of the table output, if too big then share the csv export>
