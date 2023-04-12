@@ -1,0 +1,19 @@
+earliest=$backfilldays$ latest=-0d@d index=_internal source=*license* TERM(Usage) 
+| eval indexname = if(len(idx)=0 OR isnull(idx),"(UNKNOWN)",idx) 
+| bin _time span=1d 
+| eval _time = _time+86399 
+| stats sum(b) as b by _time, indexname ,st
+| eval ingestMB_individual=round(b/1024/1024, 5) 
+| fields _time, indexname, st, ingestMB_individual
+| rename st as datatype
+| collect `valueindex` name="ingest_index_level" 
+| append 
+[ search index=_internal source=*license* TERM(RolloverSummary) earliest=$backfilldays$ latest=-0d@d 
+| bin _time span=1d 
+| stats latest(b) AS b by slave, pool, _time 
+| timechart span=1d sum(b) AS "volume" fixedrange=true 
+| eval ingestGB_rollover=round((((volume / 1024) / 1024) / 1024),5) 
+| fields - volume | eval _time = _time+86399 
+| collect `valueindex` name="ingest_rollover"
+    ]
+| head 1
